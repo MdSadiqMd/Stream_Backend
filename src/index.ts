@@ -5,6 +5,7 @@ import cors from 'cors';
 
 import { serverConfig, logger } from './config';
 import roomHandler from './handlers/room.handler';
+import streamHandler from './handlers/stream.handler';
 
 const app = express();
 app.use(cors());
@@ -15,12 +16,14 @@ const io = new Server(server, {
     cors: {
         origin: '*',
         methods: ['GET', 'POST']
-    }
+    },
+    maxHttpBufferSize: 1e8
 });
 
 io.on('connection', (socket) => {
     logger.info(`New User Connected: ${socket.id}`);
     roomHandler(socket);
+    streamHandler(socket);
     socket.on('disconnect', () => {
         logger.info(`User Disconnected: ${socket.id}`);
     });
