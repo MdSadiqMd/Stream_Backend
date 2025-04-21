@@ -1,0 +1,20 @@
+services:
+  backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: stream-backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+      - "9000:9000"
+    volumes:
+      - ./temp:/app/temp
+    environment:
+      - PORT=4000
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
