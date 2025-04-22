@@ -10,7 +10,7 @@ import streamHandler from './handlers/stream.handler';
 const app = express();
 
 app.use(cors({
-    origin: '*',
+    origin: ['*', "http://localhost:3000", "https://stream-frontend-bef.pages.dev"],
     methods: ['GET', 'POST', 'OPTIONS'],
     credentials: true
 }));
@@ -20,7 +20,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
     cors: {
-        origin: '*',
+        origin: ['*', "http://localhost:3000", "https://stream-frontend-bef.pages.dev"],
         methods: ['GET', 'POST', 'OPTIONS'],
         credentials: true,
         allowedHeaders: ['Content-Type', 'Authorization']
