@@ -1,0 +1,30 @@
+{
+    "builds": [
+        {
+            "src": "package.json",
+            "use": "@railway/node"
+        }
+    ],
+    "routes": [
+        {
+            "handle": "upgrade",
+            "src": "/socket.io/*",
+            "dest": "/app/src/index.ts"
+        },
+        {
+            "handle": "upgrade",
+            "src": "/myapp/*",
+            "dest": "/app/src/index.ts"
+        }
+    ],
+    "rewrites": [
+        {
+            "source": "/socket.io/(.*)",
+            "destination": "/app/src/index.ts"
+        },
+        {
+            "source": "/myapp/(.*)",
+            "destination": "/app/src/index.ts"
+        }
+    ]
+}
