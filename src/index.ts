@@ -17,7 +17,8 @@ const io = new Server(server, {
         origin: '*',
         methods: ['GET', 'POST']
     },
-    maxHttpBufferSize: 1e8
+    maxHttpBufferSize: 1e8,
+    transports: ['polling', 'websocket']
 });
 
 io.on('connection', (socket) => {
@@ -27,6 +28,10 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         logger.info(`User Disconnected: ${socket.id}`);
     });
+});
+
+app.get('/', (req, res) => {
+    res.json({ status: 'ok', message: 'Stream backend is running' });
 });
 
 server.listen(serverConfig.PORT, () => {

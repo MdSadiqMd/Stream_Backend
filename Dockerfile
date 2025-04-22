@@ -6,8 +6,12 @@ COPY package.json package-lock.json ./
 RUN npm ci
 RUN npm install -g peer
 COPY . .
-EXPOSE 4000 9000
 
-RUN which peer || echo "Peer not found in PATH"
+RUN echo '#!/bin/sh' > /app/start.sh && \
+    echo 'export APP_PORT=${PORT:-4000}' >> /app/start.sh && \
+    echo 'export PEER_PORT=9000' >> /app/start.sh && \
+    echo 'npx peer --port ${PEER_PORT} --path /myapp --allow_discovery true &' >> /app/start.sh && \
+    echo 'npm start' >> /app/start.sh && \
+    chmod +x /app/start.sh
 
-CMD npx peer --port 9000 --path /myapp --allow_discovery true & npm start
+CMD ["/app/start.sh"]
