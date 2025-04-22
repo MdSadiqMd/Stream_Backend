@@ -8,17 +8,30 @@ import roomHandler from './handlers/room.handler';
 import streamHandler from './handlers/stream.handler';
 
 const app = express();
-app.use(cors());
+
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    credentials: true
+}));
+app.options('*', cors());
 
 const server = http.createServer(app);
 
 const io = new Server(server, {
     cors: {
         origin: '*',
-        methods: ['GET', 'POST']
+        methods: ['GET', 'POST', 'OPTIONS'],
+        credentials: true,
+        allowedHeaders: ['Content-Type', 'Authorization']
     },
     maxHttpBufferSize: 1e8,
-    transports: ['polling', 'websocket']
+    transports: ['polling', 'websocket'],
+    allowEIO3: true
+});
+
+app.get('/', (req, res) => {
+    res.json({ status: 'ok', message: 'Stream backend is running' });
 });
 
 io.on('connection', (socket) => {
@@ -28,10 +41,6 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         logger.info(`User Disconnected: ${socket.id}`);
     });
-});
-
-app.get('/', (req, res) => {
-    res.json({ status: 'ok', message: 'Stream backend is running' });
 });
 
 server.listen(serverConfig.PORT, () => {
