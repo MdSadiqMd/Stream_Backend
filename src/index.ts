@@ -11,24 +11,11 @@ import streamHandler from './handlers/stream.handler';
 
 const app = express();
 
-const allowedOrigins = [
-    'http://localhost:3000',
-    'https://stream-frontend-bef.pages.dev'
-];
-
 app.use(cors({
-    origin: function (origin, callback) {
-        if (!origin) return callback(null, true);
-
-        if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('localhost')) {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Access-Control-Allow-Origin']
 }));
 app.options('*', cors());
 app.use('/streams', express.static(path.join(__dirname, '..', 'public', 'streams')));
@@ -37,18 +24,10 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
     cors: {
-        origin: function (origin, callback) {
-            if (!origin) return callback(null, true);
-
-            if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('localhost')) {
-                callback(null, true);
-            } else {
-                callback(new Error('Not allowed by CORS'));
-            }
-        },
+        origin: '*',
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
         credentials: true,
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Access-Control-Allow-Origin']
     },
     maxHttpBufferSize: 1e8,
     transports: ['websocket', 'polling'],
@@ -57,6 +36,9 @@ const io = new Server(server, {
 });
 
 app.get('/', (req, res) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
     res.json({
         status: 'ok',
         message: 'Stream backend is running',
@@ -67,16 +49,27 @@ app.get('/', (req, res) => {
 });
 
 app.get('/streams/info/:roomId', (req, res) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+
     const { roomId } = req.params;
     const playbackUrl = `/streams/${roomId}/playlist.m3u8`;
-    const playlistPath = path.join(__dirname, '..', 'public', 'streams', roomId, 'playlist.m3u8');
-    const isActive = fs.existsSync(playlistPath);
 
-    res.json({
-        roomId,
-        isActive,
-        playbackUrl: isActive ? playbackUrl : null
-    });
+    try {
+        const playlistPath = path.join(__dirname, '..', 'public', 'streams', roomId, 'playlist.m3u8');
+        const isActive = fs.existsSync(playlistPath);
+        res.json({
+            roomId,
+            isActive,
+            playbackUrl: isActive ? playbackUrl : null
+        });
+    } catch (error) {
+        logger.error(`Error checking stream info: ${error}`);
+        res.status(500).json({
+            error: 'Failed to check stream status'
+        });
+    }
 });
 
 io.on('connection', (socket) => {
@@ -90,5 +83,4 @@ io.on('connection', (socket) => {
 
 server.listen(serverConfig.PORT, () => {
     logger.info(`Server is running on PORT: ${serverConfig.PORT}`);
-    logger.info(`Allowed origins: ${allowedOrigins.join(', ')}`);
 });
