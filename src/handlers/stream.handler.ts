@@ -1,6 +1,5 @@
 import { Socket } from 'socket.io';
 import { spawn } from 'child_process';
-import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -8,30 +7,33 @@ import { logger, serverConfig } from '../config';
 
 interface IStreamParams {
     roomId: string;
-    streamKey: string;
 }
 
 const activeStreams = new Map<string, {
     process: any;
-    tempFilePath?: string;
+    outputDir: string;
+    isActive: boolean;
 }>();
 
 const streamHandler = (socket: Socket) => {
-    const startYouTubeStream = ({ roomId, streamKey }: IStreamParams, callback: Function) => {
+    const startHLSStream = ({ roomId }: IStreamParams, callback: Function) => {
         try {
-            if (activeStreams.has(roomId)) {
+            if (activeStreams.has(roomId) && activeStreams.get(roomId)?.isActive) {
                 logger.error(`Room ${roomId} is already streaming`);
-                return callback({ error: 'This room is already streaming to YouTube' });
+                return callback({ error: 'This room is already streaming' });
             }
-            logger.info(`Starting YouTube stream for room ${roomId}`);
+            logger.info(`Starting HLS stream for room ${roomId}`);
 
-            const tempDir = path.join(__dirname, '..', '..', 'temp');
-            if (!fs.existsSync(tempDir)) {
-                fs.mkdirSync(tempDir, { recursive: true });
+            const outputDir = path.join(__dirname, '..', '..', 'public', 'streams', roomId);
+            if (!fs.existsSync(outputDir)) {
+                fs.mkdirSync(outputDir, { recursive: true });
+            } else {
+                const files = fs.readdirSync(outputDir);
+                files.forEach(file => {
+                    fs.unlinkSync(path.join(outputDir, file));
+                });
             }
 
-            const tempFilePath = path.join(tempDir, `stream-${roomId}-${uuidv4()}.webm`);
-            const rtmpUrl = `rtmp://a.rtmp.youtube.com/live2/${streamKey}`;
             const ffmpegOptions = [
                 // Input from stdin (binary data will be piped in)
                 '-i', '-',
@@ -44,22 +46,20 @@ const streamHandler = (socket: Socket) => {
                 '-g', '60',                // GOP size (2 seconds)
                 '-keyint_min', '30',       // Minimum keyframe interval
                 '-b:v', '2500k',           // Video bitrate
-                '-maxrate', '2500k',       // Maximum bitrate
-                '-bufsize', '5000k',       // Buffer size
-
-                // Color profile settings
-                '-pix_fmt', 'yuv420p',     // Pixel format
-                '-profile:v', 'main',      // H.264 profile
-                '-level', '4.0',           // H.264 level
 
                 // Audio codec settings
                 '-c:a', 'aac',             // Audio codec
                 '-b:a', '128k',            // Audio bitrate
                 '-ar', '44100',            // Audio sample rate
 
-                // Output format and destination
-                '-f', 'flv',               // Output format (FLV for RTMP)
-                rtmpUrl                    // YouTube RTMP URL
+                // HLS specific settings
+                '-f', 'hls',               // Output format: HLS
+                '-hls_time', '2',          // Segment duration in seconds
+                '-hls_list_size', '10',    // Number of segments to keep in playlist
+                '-hls_flags', 'delete_segments+append_list',  // Delete old segments
+                '-hls_segment_type', 'mpegts',  // Segment file type
+                '-hls_segment_filename', `${outputDir}/segment_%03d.ts`,  // Segment naming pattern
+                `${outputDir}/playlist.m3u8`    // Playlist file
             ];
 
             const ffmpegProcess = spawn('ffmpeg', ffmpegOptions);
@@ -75,9 +75,8 @@ const streamHandler = (socket: Socket) => {
                 logger.error(`FFmpeg process error: ${error.message}`);
                 socket.to(roomId).emit(serverConfig.STREAMING_STATUS, { streaming: false });
                 socket.emit(serverConfig.STREAMING_STATUS, { streaming: false });
-                activeStreams.delete(roomId);
-                if (fs.existsSync(tempFilePath)) {
-                    fs.unlinkSync(tempFilePath);
+                if (activeStreams.has(roomId)) {
+                    activeStreams.get(roomId)!.isActive = false;
                 }
             });
 
@@ -85,36 +84,46 @@ const streamHandler = (socket: Socket) => {
                 logger.info(`FFmpeg process for room ${roomId} exited with code ${code}`);
                 socket.to(roomId).emit(serverConfig.STREAMING_STATUS, { streaming: false });
                 socket.emit(serverConfig.STREAMING_STATUS, { streaming: false });
-                activeStreams.delete(roomId);
-                if (fs.existsSync(tempFilePath)) {
-                    fs.unlinkSync(tempFilePath);
+                if (activeStreams.has(roomId)) {
+                    activeStreams.get(roomId)!.isActive = false;
                 }
             });
 
             activeStreams.set(roomId, {
                 process: ffmpegProcess,
-                tempFilePath
+                outputDir,
+                isActive: true
             });
 
             socket.join(`stream:${roomId}`);
-            socket.to(roomId).emit(serverConfig.STREAMING_STATUS, { streaming: true });
-            socket.emit(serverConfig.STREAMING_STATUS, { streaming: true });
-            callback({ success: true });
+            socket.to(roomId).emit(serverConfig.STREAMING_STATUS, {
+                streaming: true,
+                playbackUrl: `/streams/${roomId}/playlist.m3u8`
+            });
+            socket.emit(serverConfig.STREAMING_STATUS, {
+                streaming: true,
+                playbackUrl: `/streams/${roomId}/playlist.m3u8`
+            });
+
+            callback({
+                success: true,
+                playbackUrl: `/streams/${roomId}/playlist.m3u8`
+            });
         } catch (error) {
-            logger.error(`Error starting YouTube stream: ${error}`);
+            logger.error(`Error starting HLS stream: ${error}`);
             callback({ error: 'Failed to start streaming. Please try again.' });
         }
     };
 
-    const stopYouTubeStream = ({ roomId }: { roomId: string; }, callback: Function) => {
+    const stopHLSStream = ({ roomId }: { roomId: string; }, callback: Function) => {
         try {
             const streamData = activeStreams.get(roomId);
-            if (!streamData) {
+            if (!streamData || !streamData.isActive) {
                 logger.error(`No active stream found for room ${roomId}`);
                 return callback({ error: 'No active stream found for this room' });
             }
 
-            logger.info(`Stopping YouTube stream for room ${roomId}`);
+            logger.info(`Stopping HLS stream for room ${roomId}`);
 
             if (streamData.process) {
                 streamData.process.stdin.end();
@@ -125,17 +134,13 @@ const streamHandler = (socket: Socket) => {
                 }, 500);
             }
 
-            if (streamData.tempFilePath && fs.existsSync(streamData.tempFilePath)) {
-                fs.unlinkSync(streamData.tempFilePath);
-            }
-
-            activeStreams.delete(roomId);
+            streamData.isActive = false;
             socket.leave(`stream:${roomId}`);
             socket.to(roomId).emit(serverConfig.STREAMING_STATUS, { streaming: false });
             socket.emit(serverConfig.STREAMING_STATUS, { streaming: false });
             callback({ success: true });
         } catch (error) {
-            logger.error(`Error stopping YouTube stream: ${error}`);
+            logger.error(`Error stopping HLS stream: ${error}`);
             callback({ error: 'Failed to stop streaming. Please try again.' });
         }
     };
@@ -151,7 +156,7 @@ const streamHandler = (socket: Socket) => {
         const roomId = streamRoom.replace('stream:', '');
         const streamData = activeStreams.get(roomId);
 
-        if (!streamData || !streamData.process) {
+        if (!streamData || !streamData.isActive || !streamData.process) {
             logger.error(`Received binary stream for non-existent stream in room ${roomId}`);
             return;
         }
@@ -159,7 +164,7 @@ const streamHandler = (socket: Socket) => {
         if (streamData.process.killed || streamData.process.exitCode !== null) {
             logger.error(`FFmpeg process for room ${roomId} is no longer running`);
             socket.emit(serverConfig.STREAMING_STATUS, { streaming: false });
-            activeStreams.delete(roomId);
+            streamData.isActive = false;
             return;
         }
         streamData.process.stdin.write(data, (err: any) => {
@@ -167,28 +172,24 @@ const streamHandler = (socket: Socket) => {
                 logger.error(`Error writing to FFmpeg process: ${err}`);
                 if (err.code === 'EPIPE' || err.code === 'EOF') {
                     logger.error('FFmpeg process closed pipe or ended');
-                    stopYouTubeStream({ roomId }, () => { });
+                    stopHLSStream({ roomId }, () => { });
                 }
             }
         });
     };
 
-    socket.on(serverConfig.START_YOUTUBE_STREAM, startYouTubeStream);
-    socket.on(serverConfig.STOP_YOUTUBE_STREAM, stopYouTubeStream);
+    socket.on(serverConfig.START_HLS_STREAM, startHLSStream);
+    socket.on(serverConfig.STOP_HLS_STREAM, stopHLSStream);
     socket.on(serverConfig.BINARY_STREAM, handleBinaryStream);
 
     socket.on('disconnect', () => {
         for (const [roomId, streamData] of activeStreams.entries()) {
-            if (socket.rooms?.has(`stream:${roomId}`)) {
+            if (socket.rooms?.has(`stream:${roomId}`) && streamData.isActive) {
                 logger.info(`Cleaning up stream for room ${roomId} due to socket disconnect`);
                 if (streamData.process) {
                     streamData.process.kill('SIGINT');
                 }
-                if (streamData.tempFilePath && fs.existsSync(streamData.tempFilePath)) {
-                    fs.unlinkSync(streamData.tempFilePath);
-                }
-
-                activeStreams.delete(roomId);
+                streamData.isActive = false;
                 socket.to(roomId).emit(serverConfig.STREAMING_STATUS, { streaming: false });
             }
         }
