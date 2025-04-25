@@ -8,6 +8,7 @@ import fs from 'fs';
 import { serverConfig, logger } from './config';
 import roomHandler from './handlers/room.handler';
 import streamHandler from './handlers/stream.handler';
+import { setupStreamInfoRoutes } from './handlers/stream-info';
 
 const app = express();
 const server = http.createServer(app);
@@ -51,24 +52,11 @@ app.get('/', (req, res) => {
     });
 });
 
-app.get('/streams/info/:roomId', (req, res) => {
-    const { roomId } = req.params;
-    const playbackUrl = `/streams/${roomId}/playlist.m3u8`;
-    try {
-        const playlistPath = path.join(__dirname, '..', 'public', 'streams', roomId, 'playlist.m3u8');
-        const isActive = fs.existsSync(playlistPath);
-        res.json({
-            roomId,
-            isActive,
-            playbackUrl: isActive ? playbackUrl : null
-        });
-    } catch (error) {
-        logger.error(`Error checking stream info: ${error}`);
-        res.status(500).json({
-            error: 'Failed to check stream status'
-        });
-    }
-});
+setupStreamInfoRoutes(app);
+const streamsDir = path.join(__dirname, '..', 'public', 'streams');
+if (!fs.existsSync(streamsDir)) {
+    fs.mkdirSync(streamsDir, { recursive: true });
+}
 
 io.on('connection', (socket) => {
     logger.info(`New User Connected: ${socket.id}`);
